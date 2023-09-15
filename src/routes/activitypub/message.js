@@ -1,27 +1,21 @@
 import express from 'express';
 
-const router = express.Router();
+export const router = express.Router();
 
-router.get('/:guid', async (req, res) => {
-  const { guid } = req.params;
+router.get('/:guid', async function (req, res) {
+  let guid = req.params.guid;
   if (!guid) {
     return res.status(400).send('Bad request.');
   }
+  else {
+    let db = req.app.get('apDb');
+    const result = await db.getMessage(guid);
 
-  const db = req.app.get('apDb');
-
-  if (!req.headers.accept?.includes('json')) {
-    const bookmarkId = await db.getBookmarkIdFromMessageGuid(guid);
-    return res.redirect(`/bookmark/${bookmarkId}`);
+    if (result === undefined) {
+      return res.status(404).send(`No message found for ${guid}.`);
+    }
+    else {
+      res.json(JSON.parse(result.message));
+    }
   }
-
-  const result = await db.getMessage(guid);
-
-  if (result === undefined) {
-    return res.status(404).send(`No message found for ${guid}.`);
-  }
-
-  return res.json(JSON.parse(result.message));
 });
-
-export default router;
