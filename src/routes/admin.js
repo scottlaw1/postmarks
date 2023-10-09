@@ -1,37 +1,44 @@
-import express from "express";
-import fetch from "node-fetch";
-import { domain, actorInfo, parseJSON } from "../util.js";
-import { isAuthenticated } from "../session-auth.js";
-import {
-  lookupActorInfo,
-  createFollowMessage,
-  createUnfollowMessage,
-  signAndSend,
-  getInboxFromActorProfile
-} from "../activitypub.js";
-const DATA_PATH = "/app/.data";
+import express from 'express';
+// eslint-disable-next-line import/no-unresolved, node/no-missing-import
+import { stringify as csvStringify } from 'csv-stringify/sync'; // https://github.com/adaltas/node-csv/issues/323
+import { domain, actorInfo, parseJSON } from '../util.js';
+import { isAuthenticated } from '../session-auth.js';
+import { lookupActorInfo, createFollowMessage, createUnfollowMessage, signAndSend, getInboxFromActorProfile } from '../activitypub.js';
+
+const DATA_PATH = '/app/.data';
+
+const ADMIN_LINKS = [
+  { href: '/admin', label: 'Bookmarklet' },
+  { href: '/admin/bookmarks', label: 'Import bookmarks' },
+  { href: '/admin/followers', label: 'Permissions & followers' },
+  { href: '/admin/following', label: 'Federated follows' },
+  { href: '/admin/data', label: 'Data export' },
+];
 
 export const router = express.Router();
 
-router.get("/", isAuthenticated, async (req, res) => {
-  let params = req.query.raw ? {} : { title: "Admin" };
-  params.layout = "admin";
-
+router.get('/', isAuthenticated, async (req, res) => {
+  const params = req.query.raw ? {} : { title: 'Bookmarklet' };
+  params.adminLinks = ADMIN_LINKS;
+  params.currentPath = req.originalUrl;
   params.bookmarklet = `javascript:(function(){w=window.open('https://${domain}/bookmark/popup?url='+encodeURIComponent(window.location.href)+'&highlight='+encodeURIComponent(window.getSelection().toString()),'postmarks','scrollbars=yes,width=550,height=600');})();`;
+  params.bookmarkletTruncated = `${params.bookmarklet.substr(0, 30)}…`;
 
   return res.render("admin", params);
 });
 
-router.get("/bookmarks", isAuthenticated, async (req, res) => {
-  let params = req.query.raw ? {} : { title: "Admin: Import bookmarks" };
-  params.layout = "admin";
+router.get('/bookmarks', isAuthenticated, async (req, res) => {
+  const params = req.query.raw ? {} : { title: 'Import bookmarks' };
+  params.adminLinks = ADMIN_LINKS;
+  params.currentPath = req.originalUrl;
 
   return res.render("admin/bookmarks", params);
 });
 
-router.get("/followers", isAuthenticated, async (req, res) => {
-  let params = req.query.raw ? {} : { title: "Admin: Permissions & followers" };
-  params.layout = "admin";
+router.get('/followers', isAuthenticated, async (req, res) => {
+  const params = req.query.raw ? {} : { title: 'Permissions & followers' };
+  params.adminLinks = ADMIN_LINKS;
+  params.currentPath = req.originalUrl;
 
   const apDb = req.app.get("apDb");
 
@@ -61,11 +68,10 @@ router.get("/followers", isAuthenticated, async (req, res) => {
   return res.render("admin/followers", params);
 });
 
-router.get("/following", isAuthenticated, async (req, res) => {
-  let params = req.query.raw
-    ? {}
-    : { title: "Admin: Manage your federated follows" };
-  params.layout = "admin";
+router.get('/following', isAuthenticated, async (req, res) => {
+  const params = req.query.raw ? {} : { title: 'Federated follows' };
+  params.adminLinks = ADMIN_LINKS;
+  params.currentPath = req.originalUrl;
 
   const apDb = req.app.get("apDb");
 
@@ -83,9 +89,10 @@ router.get("/following", isAuthenticated, async (req, res) => {
   return res.render("admin/following", params);
 });
 
-router.get("/data", isAuthenticated, async (req, res) => {
-  let params = req.query.raw ? {} : { title: "Admin: Data export" };
-  params.layout = "admin";
+router.get('/data', isAuthenticated, async (req, res) => {
+  const params = req.query.raw ? {} : { title: 'Data export' };
+  params.adminLinks = ADMIN_LINKS;
+  params.currentPath = req.originalUrl;
 
   return res.render("admin/data", params);
 });
@@ -99,7 +106,18 @@ router.get("/bookmarks.db", isAuthenticated, async (req, res) => {
   res.download(filePath);
 });
 
-router.get("/activitypub.db", isAuthenticated, async (req, res) => {
+router.get('/bookmarks.csv', isAuthenticated, async (req, res) => {
+  const bookmarksDb = req.app.get('bookmarksDb');
+  const bookmarks = await bookmarksDb.getBookmarksForCSVExport();
+  const result = csvStringify(bookmarks, { quoted: true });
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="bookmarks.csv"');
+
+  res.send(result);
+});
+
+router.get('/activitypub.db', isAuthenticated, async (req, res) => {
   const filePath = `${DATA_PATH}/activitypub.db`;
 
   res.setHeader("Content-Type", "application/vnd.sqlite3");

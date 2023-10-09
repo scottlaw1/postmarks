@@ -18,6 +18,62 @@ const dbFile = "./.data/bookmarks.db";
 const exists = fs.existsSync(dbFile);
 let db;
 
+// for now, strip the HTML when we retrieve it from the DB, just so that we keep as much data as possible
+// if we ultimately decide that we don't want to do something fancier with keeping bold, italics, etc but
+// discarding Mastodon's presentational HTML tags, then we'll remove this and handle that at the time comments get stored
+function stripHtmlFromComment(comment) {
+  return { ...comment, content: stripHtml(comment.content).result };
+}
+
+function stripMentionFromComment(comment) {
+  return {
+    ...comment,
+    content: comment.content.replace(ACCOUNT_MENTION_REGEX, ''),
+  };
+}
+
+function generateLinkedDisplayName(comment) {
+  const match = comment.name.match(/^@([^@]+)@(.+)$/);
+  return {
+    linked_display_name: `<a href="http://${match[2]}/@${match[1]}">${match[1]}</a>`,
+    ...comment,
+  };
+}
+
+function addBookmarkDomain(bookmark) {
+  return { domain: new URL(bookmark.url).hostname, ...bookmark };
+}
+
+function insertRelativeTimestamp(object) {
+  // timestamps created by SQLite's CURRENT_TIMESTAMP are in UTC regardless
+  // of server setting, but don't actually indicate a timezone in the string
+  // that's returned. Had I known this, I probably would have avoided
+  // CURRENT_TIMESTAMP altogether, but since lots of people already have
+  // databases full of bookmarks, in lieu of a full-on migration to go along
+  // with a code change that sees JS-generated timestamps at the time of
+  // SQLite INSERTs, we can just append the UTC indicator to the string when parsing it.
+  return {
+    timestamp: timeSince(new Date(`${object.created_at}Z`).getTime()),
+    ...object,
+  };
+}
+
+function addTags(bookmark) {
+  const tagNames = bookmark.tags
+    ?.split(' ')
+    .map((t) => t.slice(1))
+    .sort();
+  return { tagNames, ...bookmark };
+}
+
+function massageBookmark(bookmark) {
+  return addBookmarkDomain(addTags(insertRelativeTimestamp(bookmark)));
+}
+
+function massageComment(comment) {
+  return generateLinkedDisplayName(stripMentionFromComment(stripHtmlFromComment(insertRelativeTimestamp(comment))));
+}
+
 /*
 We're using the sqlite wrapper so that we can make async / await connections
 - https://www.npmjs.com/package/sqlite
@@ -80,69 +136,50 @@ We're using the sqlite wrapper so that we can make async / await connections
         await db.run('CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, url TEXT, content TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, visible integer BOOLEAN DEFAULT 0 NOT NULL CHECK (visible IN (0,1)), bookmark_id INTEGER, FOREIGN KEY(bookmark_id) REFERENCES bookmarks(id) ON DELETE CASCADE);');
         await db.run('CREATE UNIQUE INDEX comments_url ON comments(url)');
 
-
-        const defaultsAsValuesList = defaults.map(b => `('${b.title}', '${b.url}', '${b.description}', '${b.tags}')`).join(', ');
-        db.run(`INSERT INTO bookmarks (title, url, description, tags) VALUES ${defaultsAsValuesList}`);
-      }
-    } catch (dbError) {
-      console.error(dbError);
+      const defaultsAsValuesList = defaults.map((b) => `('${b.title}', '${b.url}', '${b.description}', '${b.tags}')`).join(', ');
+      db.run(`INSERT INTO bookmarks (title, url, description, tags) VALUES ${defaultsAsValuesList}`);
     }
-  });
-
-function massageBookmark(bookmark) {
-  return addBookmarkDomain(addLinkedTags(insertRelativeTimestamp(bookmark)));
-}
-
-function massageComment(comment) {
-  return generateLinkedDisplayName(stripMentionFromComment(stripHtmlFromComment(insertRelativeTimestamp(comment))));
-}
-
-function addBookmarkDomain(bookmark) {
-  return { domain: new URL(bookmark.url).hostname, ...bookmark}
-}
-
-function insertRelativeTimestamp(object) {
-  return { timestamp: timeSince(new Date(object.created_at).getTime()), ...object };
-}
-
-// for now, strip the HTML when we retrieve it from the DB, just so that we keep as much data as possible
-// if we ultimately decide that we don't want to do something fancier with keeping bold, italics, etc but
-// discarding Mastodon's presentational HTML tags, then we'll remove this and handle that at the time comments get stored
-function stripHtmlFromComment(comment) {
-  return {...comment, content: stripHtml(comment.content).result};
-}
-
-function stripMentionFromComment(comment) {
-  return {...comment, content: comment.content.replace(ACCOUNT_MENTION_REGEX, '')};
-}
-
-function generateLinkedDisplayName(comment) {
-  const match = comment.name.match(/^@([^@]+)@(.+)$/);
-  return { linked_display_name: `<a href="http://${match[2]}/@${match[1]}">${match[1]}</a>`, ...comment};
-}
-
-function addLinkedTags(bookmark) {
-  const linkedTags = bookmark.tags?.split(' ').map(t => t.slice(1)).map((t) => {
-    return `<a href="/tagged/${t}">#${t}</a>`;
-  });
-
-  return { linkedTags, ...bookmark };
-}
+  } catch (dbError) {
+    console.error(dbError);
+  }
+});
 
 export async function getBookmarkCount() {
   const result = await db.get("SELECT count(id) as count FROM bookmarks");
   return result?.count;
 }
 
-export async function getBookmarks(limit=10, offset=0) {
+export async function getBookmarks(limit = 10, offset = 0) {
   // We use a try catch block in case of db errors
   try {
-    const results = await db.all("SELECT bookmarks.*, count(comments.id) as comment_count from bookmarks LEFT OUTER JOIN comments ON bookmarks.id = comments.bookmark_id AND comments.visible = 1 GROUP BY bookmarks.id ORDER BY updated_at DESC LIMIT ? OFFSET ?", limit, offset);
-    return results.map(b => massageBookmark(b));
+    const results = await db.all(
+      'SELECT bookmarks.*, count(comments.id) as comment_count from bookmarks LEFT OUTER JOIN comments ON bookmarks.id = comments.bookmark_id AND comments.visible = 1 GROUP BY bookmarks.id ORDER BY updated_at DESC LIMIT ? OFFSET ?',
+      limit,
+      offset,
+    );
+    return results.map((b) => massageBookmark(b));
   } catch (dbError) {
     // Database connection error
     console.error(dbError);
   }
+  return undefined;
+}
+
+export async function getBookmarksForCSVExport() {
+  // We use a try catch block in case of db errors
+  try {
+    const headers = ['title', 'url', 'description', 'tags', 'created_at', 'updated_at'];
+    const selectHeaders = headers.join(',');
+    // This will create an object where the keys and values match. This will
+    // allow the csv stringifier to interpret this as a header row.
+    const columnTitles = Object.fromEntries(headers.map((header) => [header, header]));
+    const results = await db.all(`SELECT ${selectHeaders} from bookmarks`);
+    return [columnTitles].concat(results);
+  } catch (dbError) {
+    // Database connection error
+    console.error(dbError);
+  }
+  return undefined;
 }
 
 export async function getBookmarkCountForTag(tag) {
@@ -316,4 +353,16 @@ export async function deleteAllBookmarks() {
   } catch (dbError) {
     console.error(dbError);
   }
+  return undefined;
+}
+
+export async function searchBookmarks(keywords) {
+  const results = await db.all(
+    'SELECT docid as id, * from bookmarks_fts WHERE title MATCH ? or description MATCH ? or url MATCH ? or tags MATCH ?',
+    keywords,
+    keywords,
+    keywords,
+    keywords,
+  );
+  return results.map((b) => massageBookmark(b));
 }

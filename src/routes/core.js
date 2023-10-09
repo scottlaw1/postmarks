@@ -63,11 +63,11 @@ router.get("/network", isAuthenticated, async (req, res) => {
     return {...post, href: linkify.find(post.content)?.[0]?.href};
   })
 
-  return res.render("network", {posts: linksInPosts});
-  res.status(200).json(posts);
-})
-router.get("/index.xml", async (req, res) => {
-  let params = {};
+  return res.render('network', { title: 'Your network', posts: linksInPosts });
+});
+
+router.get('/index.xml', async (req, res) => {
+  const params = {};
   const bookmarksDb = req.app.get('bookmarksDb');
 
   const bookmarks = await bookmarksDb.getBookmarks(20, 0);
@@ -77,9 +77,13 @@ router.get("/index.xml", async (req, res) => {
     params.setup = data.setupMessage;
   } else {
     params.bookmarks = bookmarks.map((bookmark) => {
-      const tag_array = bookmark.tags?.split(' ').map(b => b.slice(1)) ?? [];
-      const created_at = new Date(bookmark.created_at);
-      return {tag_array, ...bookmark, created_at: created_at.toISOString() };
+      const tagArray = bookmark.tags?.split(' ').map((b) => b.slice(1)) ?? [];
+      const createdAt = new Date(`${bookmark.created_at}Z`);
+      return {
+        tag_array: tagArray,
+        ...bookmark,
+        created_at: createdAt.toISOString(),
+      };
     });
     const last_updated = new Date(bookmarks[0].created_at);
     params.last_updated = last_updated.toISOString();
@@ -152,8 +156,24 @@ router.get("/tagged/:tag", async (req, res) => {
                     };
 
   // Send the page options or raw JSON data if the client requested it
-  return req.query.raw
-    ? res.send(params)
-    : res.render("tagged", params);
+  return req.query.raw ? res.send(params) : res.render('tagged', params);
 });
 
+router.get('/search', async (req, res) => {
+  try {
+    const bookmarksDb = req.app.get('bookmarksDb');
+    const params = { title: 'Search Bookmarks' };
+    if (req.query.query) {
+      params.keywords = req.query.query;
+      params.bookmarks = await bookmarksDb.searchBookmarks(req.query.query);
+      if (params.bookmarks.length === 0) {
+        params.error = 'No matches...';
+      }
+    }
+    params.tags = await bookmarksDb.getTags();
+    return res.render('search', params);
+  } catch (err) {
+    console.log(err);
+    return res.status(500).send('Internal Server Error');
+  }
+});

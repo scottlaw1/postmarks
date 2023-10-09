@@ -1,11 +1,12 @@
-import * as dotenv from "dotenv";
-import express from "express";
-import cors from "cors";
-import { create } from "express-handlebars";
-import { domain, account, simpleLogger, actorInfo } from "./src/util.js";
-import session, { isAuthenticated } from "./src/session-auth.js";
-import * as bookmarksDb from "./src/bookmarks-db.js";
-import * as apDb from "./src/activity-pub-db.js";
+import * as dotenv from 'dotenv';
+import express from 'express';
+import cors from 'cors';
+import { create } from 'express-handlebars';
+
+import { domain, account, simpleLogger, actorInfo, replaceEmptyText } from './src/util.js';
+import session, { isAuthenticated } from './src/session-auth.js';
+import * as bookmarksDb from './src/bookmarks-db.js';
+import * as apDb from './src/activity-pub-db.js';
 
 import routes from "./src/routes/index.js";
 
@@ -81,9 +82,30 @@ const hbs = create({
       this._sections[name] = options.fn(this);
       return null;
     },
+    mastodonAccount() {
+      return process.env.MASTODON_ACCOUNT;
+    },
+    ifIn(item, array, options) {
+      return array.indexOf(item) >= 0 ? options.fn(this) : options.inverse(this);
+    },
+    removeTag(tag, path) {
+      return path
+        .split('/')
+        .filter((x) => x !== tag)
+        .join('/');
+    },
+    ifThisTag(tag, path, options) {
+      return path === `/tagged/${tag}` ? options.fn(this) : options.inverse(this);
+    },
+    eq(a, b, options) {
+      return a === b ? options.fn(this) : options.inverse(this);
+    },
+    setTitle(item) {
+      return replaceEmptyText(item.title, item.url);
+    },
   },
-  partialsDir: "./src/pages/partials",
-  extname: ".hbs",
+  partialsDir: './src/pages/partials',
+  extname: '.hbs',
 });
 
 app.set("view engine", ".hbs");

@@ -1,10 +1,11 @@
 import fetch from "node-fetch";
 import crypto from "crypto";
 
-import { actorInfo, actorMatchesUsername } from "./util.js";
+import { signedGetJSON, signedPostJSON } from './signature.js';
+import { actorInfo, actorMatchesUsername, replaceEmptyText } from './util.js';
 
 function getGuidFromPermalink(urlString) {
-  return urlString.match(/m\/([a-zA-Z0-9+\/]+)/)[1];
+  return urlString.match(/(?:\/m\/)([a-zA-Z0-9+/]+)/)[1];
 }
 
 export async function signAndSend(
@@ -81,13 +82,11 @@ export function createNoteObject(bookmark, account, domain) {
     type: "Note",
     published: d.toISOString(),
     attributedTo: `https://${domain}/u/${account}`,
-    content: `
-      <strong><a href="${bookmark.url}">${bookmark.title}</a></strong><br/>
-      ${bookmark.description?.replace("\n", "<br/>") || ""}`,
-    to: [
-      `https://${domain}/u/${account}/followers/`,
-      "https://www.w3.org/ns/activitystreams#Public",
-    ],
+    content: `<strong><a href="${bookmark.url}" rel="nofollow noopener noreferrer" target="_blank">${replaceEmptyText(
+      bookmark.title,
+      bookmark.url,
+    )}</a></strong><br/>${bookmark.description?.trim().replace('\n', '<br/>') || ''}`,
+    to: [`https://${domain}/u/${account}/followers/`, 'https://www.w3.org/ns/activitystreams#Public'],
     tag: [],
   };
 
@@ -316,4 +315,15 @@ export async function broadcastMessage(bookmark, action, db, account, domain) {
       signAndSend(message, account, domain, db, targetDomain, inbox);
     }
   }
+}
+
+export function synthesizeActivity(note) {
+  return {
+    // Fake activity URI adds a "a-" prefix to the Note/message guid
+    id: note.id.replace('/m/', '/m/a-'),
+    type: 'Create',
+    published: note.published,
+    actor: note.attributedTo,
+    object: note,
+  };
 }

@@ -77,11 +77,9 @@ router.get("/popup", isAuthenticated, async (req, res) => {
   return res.render("edit_bookmark", params);
 });
 
-router.get("/:id", async (req, res) => {
-  let params = {};
-  const bookmarksDb = req.app.get("bookmarksDb");
-
-  params.tags = await bookmarksDb.getTags();
+router.get('/:id', async (req, res) => {
+  const params = {};
+  const bookmarksDb = req.app.get('bookmarksDb');
 
   const bookmark = await bookmarksDb.getBookmark(req.params.id);
   const comments = await bookmarksDb.getVisibleCommentsForBookmark(bookmark.id);
@@ -89,7 +87,8 @@ router.get("/:id", async (req, res) => {
   if (!bookmark) {
     params.error = data.errorMessage;
   } else {
-    params.title = `Bookmark: ${bookmark.title}`;
+    params.title = bookmark.title;
+    params.hideTitle = true;
     params.bookmark = bookmark;
     params.comments = comments;
   }
@@ -97,12 +96,10 @@ router.get("/:id", async (req, res) => {
   return req.query.raw ? res.send(params) : res.render("bookmark", params);
 });
 
-router.get("/:id/edit", isAuthenticated, async (req, res) => {
-  let params = req.query.raw ? {} : { ephemeral: false };
-  const bookmarksDb = req.app.get("bookmarksDb");
-  const apDb = req.app.get("apDb");
-
-  params.tags = await bookmarksDb.getTags();
+router.get('/:id/edit', isAuthenticated, async (req, res) => {
+  const params = req.query.raw ? {} : { ephemeral: false };
+  const bookmarksDb = req.app.get('bookmarksDb');
+  const apDb = req.app.get('apDb');
 
   const bookmark = await bookmarksDb.getBookmark(req.params.id);
   bookmark.tagsArray = encodeURIComponent(
@@ -117,7 +114,7 @@ router.get("/:id/edit", isAuthenticated, async (req, res) => {
     params.allowed = permissions?.allowed;
     params.blocked = permissions?.blocked;
 
-    params.title = `Edit Bookmark: ${bookmark.title}`;
+    params.title = 'Edit Bookmark';
     params.bookmark = bookmark;
     params.comments = comments;
   }
@@ -166,10 +163,12 @@ router.post("/multiadd", isAuthenticated, async (req, res) => {
     }
 
     if (url.length < 3) return;
+    // remove line break from URL value
+    const link = url.replace(/(\r\n|\n|\r)/gm, '');
 
     let meta = {};
     try {
-      meta = await ogScraper({ url });
+      meta = await ogScraper({ url: link });
       if (meta?.result?.ogDescription !== undefined) {
         meta.result.ogDescription = `"${meta.result.ogDescription}"`;
       }
@@ -178,9 +177,9 @@ router.post("/multiadd", isAuthenticated, async (req, res) => {
     }
 
     await bookmarksDb.createBookmark({
-      url,
-      title: meta.result.ogTitle,
-      description: meta.result.ogDescription,
+      url: link,
+      title: meta.result?.ogTitle,
+      description: (meta.result && meta.result.ogDescription) || ' ', // add *something*, even if ogDesc is empty (keeps Atom feed validation happy)
     });
   });
 
@@ -263,8 +262,8 @@ router.post("/:id?", isAuthenticated, async (req, res) => {
     bookmark = await bookmarksDb.createBookmark({
       // STRONG PARAMETERS
       url: mergedObject.url.trim(),
-      title: mergedObject.title?.trim() || "Untitled",
-      description: mergedObject.description?.trim() || "",
+      title: mergedObject.title?.trim(),
+      description: mergedObject.description?.trim() || '',
       tags,
     });
 

@@ -22,13 +22,34 @@ try {
 
 export const actorInfo = actorFileData;
 export const account = actorInfo.username || 'bookmarks';
-export const domain = process.env.PROJECT_DOMAIN ? `${process.env.PROJECT_DOMAIN}.glitch.me` : 'localhost'; // edit this if you have a custom domain
 
+export const domain = (() => {
+  if (process.env.PUBLIC_BASE_URL) {
+    return process.env.PUBLIC_BASE_URL;
+  }
+  if (process.env.PROJECT_DOMAIN) {
+    return `${process.env.PROJECT_DOMAIN}.glitch.me`;
+  }
 
-export function timeSince(ms)  {
-  var timestamp = new Date(ms);
-  var now = new Date(),
-    secondsPast = (now.getTime() - timestamp) / 1000;
+  console.log("didn't find a PUBLIC_BASE_URL or PROJECT_DOMAIN in env, assuming localhost");
+  return 'localhost';
+})();
+
+let instanceData = {};
+try {
+  const pkgFile = await readFile('package.json');
+  instanceData = JSON.parse(pkgFile);
+} catch (e) {
+  console.log('unable to read package info');
+}
+
+export const instanceType = instanceData.name || 'postmarks';
+export const instanceVersion = instanceData.version || 'undefined';
+
+export function timeSince(ms) {
+  const timestamp = new Date(ms);
+  const now = new Date(new Date().toUTCString());
+  const secondsPast = (now - timestamp) / 1000;
   if (secondsPast < 60) {
     return parseInt(secondsPast) + 's ago';
   }
@@ -88,7 +109,14 @@ export function actorMatchesUsername(actor, username) {
       console.log(`found an unparseable actor: ${actor}. Report this to https://github.com/ckolderup/postmarks/issues !`);
     }
 
-    return (account == actorResult[3] && domain == actorResult[1]);
+  return actorAccount === actorResult[3] && actorDomain === actorResult[1];
+}
+
+export function replaceEmptyText(currentValue, defaultValue) {
+  if (!currentValue || currentValue?.trim().replace(/\n/g, '') === '') {
+    return defaultValue;
+  }
+  return currentValue;
 }
 
 export function simpleLogger(req, res, next) { //middleware function
